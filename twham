@@ -1,0 +1,293 @@
+#!/usr/bin/env python2.7
+
+import ConfigParser
+import curses
+import getpass
+import HTMLParser
+import locale
+import os
+import re
+import textwrap
+import urllib2
+import urlparse
+import webbrowser
+
+import dateutil.tz
+import tweepy
+
+INI = '~/.twham'
+BLOCK_SIZE = 50
+
+class HeadRequest(urllib2.Request):
+    def get_method(self):
+        return 'HEAD'
+
+class TwhamWindow:
+    def __init__(self, window):
+        self.window = window
+        self.encoding = locale.getpreferredencoding()
+        self.date_format = locale.nl_langinfo(locale.D_FMT)
+        self.time_format = locale.nl_langinfo(locale.T_FMT)
+        self.html = HTMLParser.HTMLParser()
+        self.tzutc = dateutil.tz.tzutc()
+        self.tzlocal = dateutil.tz.tzlocal()
+        self.shortre = re.compile('^/[0-9a-zA-Z]+$')
+
+    def expand_url(self, url):
+        result = url
+        parts = urlparse.urlparse(url)
+        if parts[0] == 'http' and self.shortre.match(parts[2]):
+            try:
+                request = HeadRequest(url)
+                response = urllib2.urlopen(request)
+                result = response.geturl()
+            except:
+                pass
+        return result
+
+    def getyx(self):
+        return self.window.getyx()
+
+    def move(self, y, x):
+        ymax, xmax = self.window.getmaxyx()
+        y = max(0, min(y, ymax - 1))
+        x = max(0, min(x, xmax - 1))
+        self.window.move(y, x)
+
+    def pstring(self, string, attr=curses.A_NORMAL):
+        try:
+            self.window.addstr(string.encode(self.encoding), attr)
+        except:
+            pass
+
+    def ptext(self, text):
+        ymax, xmax = self.window.getmaxyx()
+        text = self.html.unescape(text)
+        paras = []
+        for para in text.split('\n'):
+            paras.extend(textwrap.wrap(para, xmax - 1))
+        self.pstring('\n'.join(paras))
+
+    def pdatetime(self, when):
+        when_utc = when.replace(tzinfo=self.tzutc)
+        when_local = when_utc.astimezone(self.tzlocal)
+        self.pstring(when_local.strftime(self.time_format))
+        self.pstring(' ')
+        self.pstring(when_local.strftime(self.date_format))
+
+    def puser(self, user):
+        self.pstring(user.name)
+        self.pstring(' (@')
+        self.pstring(user.screen_name)
+        self.pstring(')')
+
+    def pmedia(self, media):
+        y, x = self.getyx()
+        y = y - 1
+        for medium in media:
+            y = y + 1
+            self.move(y, x)
+            self.pstring('media: ')
+            self.pstring(medium.get('media_url_https'))
+            y, w = self.getyx()
+
+    def purls(self, urls, expand=False):
+        y, x = self.getyx()
+        y = y - 1
+        for url in urls:
+            y = y + 1
+            self.move(y, x)
+            self.pstring(url.get('url'))
+            self.pstring(' > ')
+            if expand:
+                self.pstring(self.expand_url(url.get('expanded_url')))
+            else:
+                self.pstring(url.get('expanded_url'))
+            y, w = self.getyx()
+
+    def pstatus(self, status, expand=False):
+        y, x = self.getyx()
+        if hasattr(status, 'retweeted_status'):
+            self.puser(status.user)
+            self.pstring(' ')
+            self.pdatetime(status.created_at)
+            y = y + 1
+            self.move(y, x)
+            self.pstring('retweet:')
+            y = y + 1
+            self.move(y, x)
+            status = status.retweeted_status
+        self.puser(status.user)
+        self.pstring(' ')
+        self.pdatetime(status.created_at)
+        y = y + 1
+        self.move(y, x)
+        self.ptext(status.text)
+        media = status.entities.get('media', None)
+        if media:
+            y, w = self.getyx()
+            y = y + 2
+            self.move(y, x)
+            self.pmedia(media)
+        urls = status.entities.get('urls', None)
+        if urls:
+            y, w = self.getyx()
+            y = y + 2
+            self.move(y, x)
+            self.purls(urls, expand)
+
+class PrivateConfig(ConfigParser.SafeConfigParser):
+    def __init__(self, ini):
+        ConfigParser.SafeConfigParser.__init__(self)
+        self.ini = os.path.expanduser(ini)
+        self.read([self.ini])
+
+    def get_option(self, section, option):
+        result = None
+        if self.has_option(section, option):
+            result = self.get(section, option)
+        return result
+
+    def save(self):
+        fdout = os.open(self.ini, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0600)
+        fout = os.fdopen(fdout, 'w')
+        self.write(fout)
+        fout.close()
+
+    def set_option(self, section, option, value):
+        if not self.has_section(section):
+            self.add_section(section)
+        self.set(section, option, value)
+
+def get_auth(config):
+    result = None
+    app_key = config.get_option('APP', 'key')
+    app_secret = config.get_option('APP', 'secret')
+    auth_key = config.get_option('AUTH', 'key')
+    auth_secret = config.get_option('AUTH', 'secret')
+    if app_key and app_secret and auth_key and auth_secret:
+        result = tweepy.OAuthHandler(app_key, app_secret)
+        result.set_access_token(auth_key, auth_secret)
+    else:
+        print 'To connect to your Twitter account, open this URL in a web browser:'
+        print
+        print 'https://dev.twitter.com/apps/new'
+        print
+        print 'Fill out the required fields. Suggested values:'
+        print
+        print 'Name: ' + getpass.getuser() + "'s twham"
+        print 'Description: Yet another console client'
+        print 'Website: https://twitter.com/' + getpass.getuser()
+        print
+        print 'Enter the OAuth values (copy-and-paste works best):'
+        print
+        app_key = raw_input('Consumer key: ')
+        app_secret = raw_input('Consumer secret: ')
+        print
+        print 'Click "Create my access token" and then'
+        print 'enter the access values (copy-and-paste works best):'
+        print
+        auth_key = raw_input('Access token: ')
+        auth_secret = raw_input('Access token secret: ')
+        if app_key and app_secret and auth_key and auth_secret:
+            config.set_option('APP', 'key', app_key)
+            config.set_option('APP', 'secret', app_secret)
+            config.set_option('AUTH', 'key', auth_key)
+            config.set_option('AUTH', 'secret', auth_secret)
+            config.save()
+            result = tweepy.OAuthHandler(app_key, app_secret)
+            result.set_access_token(auth_key, auth_secret)
+    return result
+
+def main(window, config, api):
+    curses.use_default_colors()
+    curses.curs_set(0)
+
+    statuses = []
+    status = None
+    index = 0;
+    expand = False
+    id_str = config.get_option('RESTORE', 'status')
+
+    twham = TwhamWindow(window)
+    while True:
+        if index < 0:
+            if len(statuses):
+                new = api.home_timeline(count=BLOCK_SIZE, since_id=statuses[0].id_str)
+            else:
+                new = api.home_timeline(count=BLOCK_SIZE)
+            if len(new):
+                statuses[0:0] = new
+                index = index + len(new)
+        elif index >= len(statuses):
+            if len(statuses):
+                new = api.home_timeline(count=BLOCK_SIZE, max_id=statuses[len(statuses) - 1].id_str)
+            else:
+                new = api.home_timeline(count=BLOCK_SIZE)
+            if len(new):
+                offset = 0
+                if len(statuses) and statuses[len(statuses) - 1].id_str == new[0].id_str:
+                    offset = 1
+                statuses[len(statuses) - offset:len(statuses)] = new
+                if id_str:
+                    for i in range(0, len(statuses)):
+                        if id_str == statuses[i].id_str:
+                            index = i
+                            id_str = None
+                            break
+        index = max(0, min(index, len(statuses)))
+        status = statuses[index] if index < len(statuses) else None
+        window.erase()
+        twham.move(0, 0)
+        if status:
+            twham.pstatus(status, expand)
+        expand = False
+        y, x = window.getmaxyx()
+        string = '['
+        string = string + str(index + 1)
+        string = string + '/'
+        string = string + str(len(statuses))
+        string = string + ']'
+        twham.move(0, x - len(string))
+        twham.pstring(string)
+        key = window.getch()
+        if key == ord('q'):
+            break
+        elif key == ord('e'):
+            expand = True
+        elif key == ord('b'):
+            if status:
+                url = 'https://twitter.com/' + status.user.screen_name + '/statuses/' + status.id_str
+                curses.savetty()
+                webbrowser.open_new_tab(url)
+                curses.resetty()
+                window.clear()
+        elif key == ord('r'):
+            window.clear()
+        elif key == curses.KEY_UP or key == ord(' '):
+            index = index - 1
+        elif key == curses.KEY_DOWN:
+            index = index + 1
+        elif key == curses.KEY_PPAGE:
+            index = index - 20
+        elif key == curses.KEY_NPAGE:
+            index = index + 20
+        elif key == curses.KEY_HOME:
+            index = 0
+        elif key == curses.KEY_END:
+            index = len(statuses) - 1
+    if status:
+        config.set_option('RESTORE', 'status', status.id_str)
+        config.save()
+    window.erase()
+
+locale.setlocale(locale.LC_ALL, '')
+config = PrivateConfig(INI)
+auth = get_auth(config)
+if not auth:
+    print
+    print 'OAuth values incomplete.'
+    exit(1)
+api = tweepy.API(auth)
+curses.wrapper(main, config, api)
+
