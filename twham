@@ -217,6 +217,7 @@ def get_auth(config):
 def main(window, config, api):
     curses.use_default_colors()
     curses.curs_set(0)
+    curses.savetty()
 
     statuses = []
     status = None
@@ -273,12 +274,15 @@ def main(window, config, api):
         elif key == ord('b'):
             if status:
                 url = 'https://twitter.com/' + status.user.screen_name + '/statuses/' + status.id_str
-                curses.savetty()
                 webbrowser.open_new_tab(url)
                 curses.resetty()
                 window.clear()
         elif key == ord('r'):
-            window.clear()
+           curses.resetty()
+           curses.noecho()
+           curses.cbreak()
+           window.keypad(1)
+           window.clear()
         elif key == curses.KEY_UP or key == ord(' '):
             index = index - 1
         elif key == curses.KEY_DOWN:
