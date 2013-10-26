@@ -20,8 +20,11 @@ import curses
 import getpass
 import HTMLParser
 import locale
+import tempfile
 import os
 import re
+import shutil
+import subprocess
 import textwrap
 import urllib2
 import urlparse
@@ -96,22 +99,27 @@ class TwhamWindow:
         self.pstring(user.screen_name)
         self.pstring(')')
 
-    def pmedia(self, media):
+    def pmedia(self, media, count):
         y, x = self.getyx()
         y = y - 1
         for medium in media:
             y = y + 1
             self.move(y, x)
-            self.pstring('media: ')
+            self.pstring(str(count))
+            self.pstring(' media > ')
             self.pstring(medium.get('media_url_https'))
             y, w = self.getyx()
+            count = count + 1
+        return count
 
-    def purls(self, urls, expand=False):
+    def purls(self, urls, count, expand=False):
         y, x = self.getyx()
         y = y - 1
         for url in urls:
             y = y + 1
             self.move(y, x)
+            self.pstring(str(count))
+            self.pstring(' ')
             self.pstring(url.get('url'))
             self.pstring(' > ')
             if expand:
@@ -119,6 +127,8 @@ class TwhamWindow:
             else:
                 self.pstring(url.get('expanded_url'))
             y, w = self.getyx()
+            count = count + 1
+        return count
 
     def pstatus(self, status, expand=False):
         y, x = self.getyx()
@@ -139,17 +149,18 @@ class TwhamWindow:
         self.move(y, x)
         self.ptext(status.text)
         media = status.entities.get('media', None)
+        count = 1
         if media:
             y, w = self.getyx()
             y = y + 2
             self.move(y, x)
-            self.pmedia(media)
+            count = self.pmedia(media, count)
         urls = status.entities.get('urls', None)
         if urls:
             y, w = self.getyx()
             y = y + 2
             self.move(y, x)
-            self.purls(urls, expand)
+            count = self.purls(urls, count, expand)
 
 class PrivateConfig(ConfigParser.SafeConfigParser):
     def __init__(self, ini):
@@ -213,6 +224,37 @@ def get_auth(config):
             result = tweepy.OAuthHandler(app_key, app_secret)
             result.set_access_token(auth_key, auth_secret)
     return result
+
+def view_media(url):
+    parts = urlparse.urlparse(url)
+    path, ext = os.path.splitext(parts.path)
+    try:
+        request = urllib2.Request(url)
+        response = urllib2.urlopen(request)
+        fd, path = tempfile.mkstemp(suffix=ext)
+        out = os.fdopen(fd, 'w')
+        shutil.copyfileobj(response, out)
+        out.close()
+        response.close()
+        if os.path.isfile(path):
+            subprocess.call(["xdg-open", path])
+    except:
+        pass
+
+def view_by_index(status, index):
+    count = 0
+    media = status.entities.get('media', [])
+    for medium in media:
+        if count == index:
+            view_media(medium.get('media_url_https'))
+            return
+        count = count + 1
+    urls = status.entities.get('urls', [])
+    for url in urls:
+        if count == index:
+            webbrowser.open_new_tab(url.get('expanded_url'))
+            return
+        count = count + 1
 
 def main(window, config, api):
     curses.use_default_colors()
@@ -278,11 +320,13 @@ def main(window, config, api):
                 curses.resetty()
                 window.clear()
         elif key == ord('r'):
-           curses.resetty()
-           curses.noecho()
-           curses.cbreak()
-           window.keypad(1)
-           window.clear()
+            curses.resetty()
+            curses.noecho()
+            curses.cbreak()
+            window.keypad(1)
+            window.clear()
+        elif ord('1') <= key and key <= ord('9') and status:
+            view_by_index(status, key - ord('1'))
         elif key == curses.KEY_UP or key == ord(' '):
             index = index - 1
         elif key == curses.KEY_DOWN:
