@@ -265,10 +265,16 @@ def main(window, config, api):
     status = None
     index = 0;
     expand = False
+    index_length = 1
     id_str = config.get_option('RESTORE', 'status')
 
     twham = TwhamWindow(window)
     while True:
+        if index < 0 or index >= len(statuses):
+            y, x = window.getmaxyx()
+            twham.move(0, x - index_length)
+            twham.pstring('*' * index_length)
+            window.refresh()
         if index < 0:
             if len(statuses):
                 new = api.home_timeline(count=BLOCK_SIZE, since_id=statuses[0].id_str)
@@ -306,7 +312,8 @@ def main(window, config, api):
         string = string + '/'
         string = string + str(len(statuses))
         string = string + ']'
-        twham.move(0, x - len(string))
+        index_length = len(string)
+        twham.move(0, x - index_length)
         twham.pstring(string)
         key = window.getch()
         if key == ord('q'):
