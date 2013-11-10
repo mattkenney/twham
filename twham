@@ -160,6 +160,8 @@ class Twham:
             pass
 
     def view_by_index(self, status, index):
+        if hasattr(status, 'retweeted_status'):
+            status = status.retweeted_status
         count = 0
         media = status.entities.get('media', [])
         for medium in media:
@@ -326,7 +328,7 @@ def main(window, config, api):
                 webbrowser.open_new_tab(url)
                 curses.resetty()
                 window.clear()
-        elif key == ord('r'):
+        elif key == ord('l'):
             curses.resetty()
             curses.noecho()
             curses.cbreak()
