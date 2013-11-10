@@ -24,6 +24,7 @@ import tempfile
 import os
 import re
 import shutil
+import smtplib
 import subprocess
 import sys
 import textwrap
@@ -63,6 +64,12 @@ class Twham:
         parts.append(when_local.strftime(self.time_format))
         parts.append(when_local.strftime(self.date_format))
         return ' '.join(parts)
+
+    def format(self, status, text):
+        created_at = self.datetime(status.created_at)
+        name = status.user.name
+        screen_name = status.user.screen_name
+        return text.format(created_at=created_at, name=name, screen_name=screen_name)
 
     def head(self, status):
         parts = []
@@ -256,6 +263,29 @@ def get_auth(config):
             result.set_access_token(auth_key, auth_secret)
     return result
 
+def mail(subject, text):
+    result = 'not sent'
+    mail_smtp = config.get_option('MAIL', 'smtp')
+    mail_from = config.get_option('MAIL', 'from')
+    mail_to = config.get_option('MAIL', 'to')
+    if mail_smtp and mail_from and mail_to:
+        paras = []
+        paras.append('From: ' + mail_from)
+        paras.append('To: ' + mail_to)
+        paras.append('Subject: ' + subject)
+        paras.append('')
+        paras.extend(text.split('\n'))
+        connection = None
+        try:
+            connection = smtplib.SMTP(mail_smtp)
+            connection.sendmail(mail_from, mail_to, '\r\n'.join(paras))
+            result = 'email sent'
+        except:
+            pass
+        if connection:
+            connection.quit()
+    return result
+
 def main(window, config, api):
     curses.use_default_colors()
     curses.curs_set(0)
@@ -266,6 +296,7 @@ def main(window, config, api):
     index = 0;
     expand = False
     index_length = 1
+    message = ''
     id_str = config.get_option('RESTORE', 'status')
 
     twham = Twham()
@@ -307,16 +338,18 @@ def main(window, config, api):
         if status:
             nwin.addstr(twham.status(status, xmax - 1, expand))
         expand = False
-        parts = []
-        parts.append('[')
-        parts.append(str(index + 1))
-        parts.append('/')
-        parts.append(str(len(statuses)))
-        parts.append(']')
-        string = ''.join(parts)
-        index_length = len(string)
+        if not message:
+            parts = []
+            parts.append('[')
+            parts.append(str(index + 1))
+            parts.append('/')
+            parts.append(str(len(statuses)))
+            parts.append(']')
+            message = ''.join(parts)
+        index_length = len(message)
         nwin.move(0, xmax - index_length)
-        nwin.addstr(string)
+        nwin.addstr(message)
+        message = ''
         key = window.getch()
         if key == ord('q'):
             break
@@ -334,6 +367,11 @@ def main(window, config, api):
             curses.cbreak()
             window.keypad(1)
             window.clear()
+        elif key == ord('m'):
+            subject = config.get_option('MAIL', 'subject')
+            subject = twham.format(status, subject)
+            body = twham.status(status, 78, False)
+            message = mail(subject, body)
         elif ord('1') <= key and key <= ord('9') and status:
             twham.view_by_index(status, key - ord('1'))
         elif key == curses.KEY_UP or key == ord(' '):
