@@ -16,6 +16,7 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import ConfigParser
+import cookielib
 import curses
 import email.mime.text
 import getpass
@@ -120,9 +121,13 @@ class Twham:
         result = url
         parts = urlparse.urlparse(url)
         if parts[0] == 'http' and self.shortre.match(parts[2]):
+            jar = cookielib.CookieJar()
+            proc = urllib2.HTTPCookieProcessor(jar)
+            opener = urllib2.build_opener(proc)
+            opener.addheaders.append(('Accept', '*/*'))
             try:
                 request = HeadRequest(url)
-                response = urllib2.urlopen(request)
+                response = opener.open(request)
                 result = response.geturl()
             except:
                 pass
