@@ -17,6 +17,7 @@
 
 import ConfigParser
 import curses
+import email.mime.text
 import getpass
 import HTMLParser
 import locale
@@ -140,6 +141,7 @@ class Twham:
             else:
                 parts.append(url.get('expanded_url'))
             paras.append(' '.join(parts))
+            count += 1
         return '\n'.join(paras)
 
     def user(self, user):
@@ -269,21 +271,22 @@ def mail(subject, text):
     mail_from = config.get_option('MAIL', 'from')
     mail_to = config.get_option('MAIL', 'to')
     if mail_smtp and mail_from and mail_to:
-        paras = []
-        paras.append('From: ' + mail_from)
-        paras.append('To: ' + mail_to)
-        paras.append('Subject: ' + subject)
-        paras.append('')
-        paras.extend(text.split('\n'))
+        message = email.mime.text.MIMEText(text.replace('\n', '\r\n'), 'plain', 'utf-8')
+        message['From'] = mail_from;
+        message['To'] = mail_to;
+        message['Subject'] = subject;
         connection = None
         try:
-            connection = smtplib.SMTP(mail_smtp)
-            connection.sendmail(mail_from, mail_to, '\r\n'.join(paras))
+            connection = smtplib.SMTP(mail_smtp, 0, None, 10)
+            connection.sendmail(mail_from, mail_to, message.as_string(unixfrom=False))
             result = 'email sent'
         except:
             pass
         if connection:
-            connection.quit()
+            try:
+                connection.quit()
+            except:
+                pass
     return result
 
 def main(window, config, api):
@@ -303,10 +306,9 @@ def main(window, config, api):
     nwin = NWindow(window)
     while True:
         ymax, xmax = window.getmaxyx()
-        if index < 0 or index >= len(statuses):
-            nwin.move(0, xmax - index_length)
-            nwin.addstr('*' * index_length)
-            window.refresh()
+        nwin.move(0, xmax - index_length)
+        nwin.addstr('*' * index_length)
+        window.refresh()
         if index < 0:
             if len(statuses):
                 new = api.home_timeline(count=BLOCK_SIZE, since_id=statuses[0].id_str)
