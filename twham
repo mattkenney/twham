@@ -375,33 +375,16 @@ def main(window, config, api):
         nwin.addstr(message)
         message = ''
         key = window.getch()
-        if escape and status:
-            if key == ord('v'):
-                subject = config.get_option('MAIL', 'subject')
-                subject = twham.format(status, subject)
-                body = twham.status(status, 78, False)
-                message = mail(subject, body)
-            elif ord('1') <= key and key <= ord('9'):
-                url = twham.get_url(status, key - ord('1'))
-                if url:
-                    message = 'URL ' + mail('URL', url, 'url')
-        elif key == ord('q'):
+        if key == ord('q'):
             break
         elif key == ord('e'):
             expand = True
-        elif key == ord('v') and status:
-            url = 'https://twitter.com/' + status.user.screen_name + '/statuses/' + status.id_str
-            webbrowser.open_new_tab(url)
-            curses.resetty()
-            window.clear()
         elif key == ord('l'):
             curses.resetty()
             curses.noecho()
             curses.cbreak()
             window.keypad(1)
             window.clear()
-        elif ord('1') <= key and key <= ord('9') and status:
-            twham.view_by_index(status, key - ord('1'))
         elif key == curses.KEY_UP or key == ord(' '):
             index = index - 1
         elif key == curses.KEY_DOWN:
@@ -414,6 +397,25 @@ def main(window, config, api):
             index = 0
         elif key == curses.KEY_END:
             index = len(statuses) - 1
+        elif not status:
+            continue
+        elif escape:
+            if key == ord('v'):
+                subject = config.get_option('MAIL', 'subject')
+                subject = twham.format(status, subject)
+                body = twham.status(status, 78, False)
+                message = mail(subject, body)
+            elif ord('1') <= key and key <= ord('9'):
+                url = twham.get_url(status, key - ord('1'))
+                if url:
+                    message = 'URL ' + mail('URL', url, 'url')
+        elif key == ord('v'):
+            url = 'https://twitter.com/' + status.user.screen_name + '/statuses/' + status.id_str
+            webbrowser.open_new_tab(url)
+            curses.resetty()
+            window.clear()
+        elif ord('1') <= key and key <= ord('9'):
+            twham.view_by_index(status, key - ord('1'))
         escape = (key == 27)
     if status:
         config.set_option('RESTORE', 'status', status.id_str)
