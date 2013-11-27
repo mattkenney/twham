@@ -73,6 +73,22 @@ class Twham:
         screen_name = status.user.screen_name
         return text.format(created_at=created_at, name=name, screen_name=screen_name)
 
+    def get_url(self, status, index):
+        if hasattr(status, 'retweeted_status'):
+            status = status.retweeted_status
+        count = 0
+        media = status.entities.get('media', [])
+        for medium in media:
+            if count == index:
+                return medium.get('media_url_https')
+            count = count + 1
+        urls = status.entities.get('urls', [])
+        for url in urls:
+            if count == index:
+                return url.get('expanded_url')
+            count = count + 1
+        return None
+
     def head(self, status):
         parts = []
         parts.append(self.user(status.user))
@@ -270,11 +286,11 @@ def get_auth(config):
             result.set_access_token(auth_key, auth_secret)
     return result
 
-def mail(subject, text):
+def mail(subject, text, to_key='to'):
     result = 'not sent'
     mail_smtp = config.get_option('MAIL', 'smtp')
     mail_from = config.get_option('MAIL', 'from')
-    mail_to = config.get_option('MAIL', 'to')
+    mail_to = config.get_option('MAIL', to_key)
     if mail_smtp and mail_from and mail_to:
         message = email.mime.text.MIMEText(text.replace('\n', '\r\n'), 'plain', 'utf-8')
         message['From'] = mail_from;
@@ -305,6 +321,7 @@ def main(window, config, api):
     expand = False
     index_length = 1
     message = ''
+    escape = False
     id_str = config.get_option('RESTORE', 'status')
 
     twham = Twham()
@@ -358,27 +375,31 @@ def main(window, config, api):
         nwin.addstr(message)
         message = ''
         key = window.getch()
-        if key == ord('q'):
+        if escape and status:
+            if key == ord('v'):
+                subject = config.get_option('MAIL', 'subject')
+                subject = twham.format(status, subject)
+                body = twham.status(status, 78, False)
+                message = mail(subject, body)
+            elif ord('1') <= key and key <= ord('9'):
+                url = twham.get_url(status, key - ord('1'))
+                if url:
+                    message = 'URL ' + mail('URL', url, 'url')
+        elif key == ord('q'):
             break
         elif key == ord('e'):
             expand = True
-        elif key == ord('b'):
-            if status:
-                url = 'https://twitter.com/' + status.user.screen_name + '/statuses/' + status.id_str
-                webbrowser.open_new_tab(url)
-                curses.resetty()
-                window.clear()
+        elif key == ord('v') and status:
+            url = 'https://twitter.com/' + status.user.screen_name + '/statuses/' + status.id_str
+            webbrowser.open_new_tab(url)
+            curses.resetty()
+            window.clear()
         elif key == ord('l'):
             curses.resetty()
             curses.noecho()
             curses.cbreak()
             window.keypad(1)
             window.clear()
-        elif key == ord('m'):
-            subject = config.get_option('MAIL', 'subject')
-            subject = twham.format(status, subject)
-            body = twham.status(status, 78, False)
-            message = mail(subject, body)
         elif ord('1') <= key and key <= ord('9') and status:
             twham.view_by_index(status, key - ord('1'))
         elif key == curses.KEY_UP or key == ord(' '):
@@ -393,6 +414,7 @@ def main(window, config, api):
             index = 0
         elif key == curses.KEY_END:
             index = len(statuses) - 1
+        escape = (key == 27)
     if status:
         config.set_option('RESTORE', 'status', status.id_str)
         config.save()
