@@ -1,6 +1,6 @@
 #!/usr/bin/env python2.7
 
-#    Copyright 2013 Matt Kenney
+#    Copyright 2013, 2014 Matt Kenney
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -52,6 +52,7 @@ class Twham:
         self.tzutc = dateutil.tz.tzutc()
         self.tzlocal = dateutil.tz.tzlocal()
         self.shortre = re.compile('^/[0-9a-zA-Z]+$')
+        self.status_url = re.compile('^https://twitter.com/[^/]+/status/([0-9]+)$')
         if sys.platform == 'darwin':
             self.opener = 'open'
         elif sys.platform == 'win32':
@@ -202,7 +203,11 @@ class Twham:
         urls = status.entities.get('urls', [])
         for url in urls:
             if count == index:
-                webbrowser.open_new_tab(url.get('expanded_url'))
+                expanded = self.url(url.get('expanded_url'))
+                m = self.status_url.match(expanded)
+                if m:
+                    return m.group(1)
+                webbrowser.open_new_tab(expanded)
                 return
             count = count + 1
 
@@ -317,6 +322,7 @@ def main(window, config, api):
 
     statuses = []
     status = None
+    status_id = None
     index = 0;
     expand = False
     index_length = 1
@@ -355,10 +361,15 @@ def main(window, config, api):
                             index = i
                             id_str = None
                             break
-        index = max(0, min(index, len(statuses)))
-        status = statuses[index] if index < len(statuses) else None
         window.erase()
         nwin.move(0, 0)
+        index = max(0, min(index, len(statuses)))
+        status = statuses[index] if index < len(statuses) else None
+        if status_id:
+            linked = api.get_status(status_id)
+            status_id = None
+            if linked:
+                status = linked
         if status:
             nwin.addstr(twham.status(status, xmax - 1, expand))
         expand = False
@@ -415,8 +426,9 @@ def main(window, config, api):
             curses.resetty()
             window.clear()
         elif ord('1') <= key and key <= ord('9'):
-            twham.view_by_index(status, key - ord('1'))
+            status_id = twham.view_by_index(status, key - ord('1'))
         escape = (key == 27)
+    status = statuses[index] if index < len(statuses) else None
     if status:
         config.set_option('RESTORE', 'status', status.id_str)
         config.save()
