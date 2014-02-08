@@ -112,6 +112,7 @@ class Twham:
             parts.append('media >')
             parts.append(medium.get('media_url_https'))
             paras.append(' '.join(parts))
+            count += 1
         return '\n'.join(paras)
 
     def status(self, status, width, expand=False):
