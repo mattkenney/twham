@@ -1,6 +1,6 @@
 #!/usr/bin/env python2.7
 
-#    Copyright 2013, 2014 Matt Kenney
+#    Copyright 2013, 2014, 2015 Matt Kenney
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -52,7 +52,7 @@ class Twham:
         self.tzutc = dateutil.tz.tzutc()
         self.tzlocal = dateutil.tz.tzlocal()
         self.shortre = re.compile('^/[0-9a-zA-Z]+$')
-        self.status_url = re.compile('^https://twitter.com/[^/]+/status/([0-9]+)$')
+        self.status_url = re.compile('^https://twitter.com/[^/]+/status/([0-9]+)')
         if sys.platform == 'darwin':
             self.opener = 'open'
         elif sys.platform == 'win32':
@@ -329,6 +329,8 @@ def main(window, config, api):
     index_length = 1
     message = ''
     escape = False
+    double_escape = False
+    keypad = False
     id_str = config.get_option('RESTORE', 'status')
 
     twham = Twham()
@@ -338,24 +340,31 @@ def main(window, config, api):
         nwin.move(0, xmax - index_length)
         nwin.addstr('*' * index_length)
         window.refresh()
+        new = []
         if index < 0:
-            if len(statuses):
-                new = api.home_timeline(count=BLOCK_SIZE, since_id=statuses[0].id_str)
-            else:
-                new = api.home_timeline(count=BLOCK_SIZE)
+            try:
+                if len(statuses):
+                    new = api.home_timeline(count=BLOCK_SIZE, since_id=statuses[0].id_str)
+                else:
+                    new = api.home_timeline(count=BLOCK_SIZE)
+            except:
+                pass
             if len(new):
                 statuses[0:0] = new
                 index += len(new)
         elif index >= len(statuses):
-            if len(statuses):
-                new = api.home_timeline(count=BLOCK_SIZE, max_id=statuses[len(statuses) - 1].id_str)
-            else:
-                new = api.home_timeline(count=BLOCK_SIZE)
+            try:
+                if len(statuses):
+                    new = api.home_timeline(count=BLOCK_SIZE, max_id=statuses[-1].id_str)
+                else:
+                    new = api.home_timeline(count=BLOCK_SIZE)
+            except:
+                pass
             if len(new):
                 offset = 0
-                if len(statuses) and statuses[len(statuses) - 1].id_str == new[0].id_str:
+                if len(statuses) and statuses[-1].id_str == new[0].id_str:
                     offset = 1
-                statuses[len(statuses) - offset:len(statuses)] = new
+                statuses[-offset:] = new
                 if id_str:
                     for i in range(0, len(statuses)):
                         if id_str == statuses[i].id_str:
@@ -367,7 +376,11 @@ def main(window, config, api):
         index = max(0, min(index, len(statuses)))
         status = statuses[index] if index < len(statuses) else None
         if status_id:
-            linked = api.get_status(status_id)
+            linked = None
+            try:
+                linked = api.get_status(status_id)
+            except:
+                pass
             status_id = None
             if linked:
                 status = linked
@@ -387,7 +400,11 @@ def main(window, config, api):
         nwin.addstr(message)
         message = ''
         key = window.getch()
-        if key == ord('q'):
+        if keypad:
+            if ord('p') <= key and key <= ord('y'):
+                key += ord('0') - ord('p')
+            keypad = False
+        if key == ord('q') or key == ord('Q'):
             break
         elif key == ord('e'):
             expand = True
@@ -421,6 +438,11 @@ def main(window, config, api):
                 url = twham.get_url(status, key - ord('1'))
                 if url:
                     message = 'URL ' + mail('URL', url, 'url')
+            elif key == ord('O'):
+                keypad = True
+                if double_escape:
+                    key = 27
+                    escape = False
         elif key == ord('v'):
             url = 'https://twitter.com/' + status.user.screen_name + '/statuses/' + status.id_str
             webbrowser.open_new_tab(url)
@@ -428,6 +450,7 @@ def main(window, config, api):
             window.clear()
         elif ord('1') <= key and key <= ord('9'):
             status_id = twham.view_by_index(status, key - ord('1'))
+        double_escape = escape and key == 27
         escape = (key == 27)
     status = statuses[index] if index < len(statuses) else None
     if status:
